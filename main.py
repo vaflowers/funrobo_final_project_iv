@@ -47,7 +47,7 @@ def detect_waypoints(cap, model, curr_joints_rad, exclude_ids=None, nframes=25, 
         [0, 0, 1],
         [1, 0, 0],
         [0, -1, 0]
-    ], dtype=float)
+    ], dtype=float)S
     H_cam_offset = np.eye(4)
     H_cam_offset[:3, :3] = R_cam
     H_cam_offset[:3, 3] = [-0.04, 0, 0]
@@ -118,12 +118,11 @@ def main():
         cap = cv.VideoCapture(0)
         time.sleep(2) # Camera warm-up for exposure
        
-        # --- 3. Marker Detection & Frame Transformation ---
-        # Compute H_base_to_cam ONCE (transform instability should not come from here)
+        # Frame Transformation 
         H_cumulative, _ = model.compute_transformation_matrices(curr_joints_rad[:5])
-        H_base_to_wrist = H_cumulative[4]  # wrist / joint-4 frame (camera bracket)
+        H_base_to_wrist = H_cumulative[4] 
 
-        # Wrist -> Camera mount rotation (keep this as your calibrated/guessed fixed matrix).
+        # rotation from camera frame to robot frame
         R_cam = np.array([
             [0, 0, 1],
             [1, 0, 0],
@@ -131,13 +130,13 @@ def main():
         ], dtype=float)
         H_cam_offset = np.eye(4)
         H_cam_offset[:3, :3] = R_cam
-        H_cam_offset[:3, 3] = [-0.04, 0, 0]  # meters, lens offset from wrist pivot (in wrist frame)
+        H_cam_offset[:3, 3] = [-0.04, 0, 0] 
 
         H_base_to_cam = H_base_to_wrist @ H_cam_offset
         print("Camera world position:", H_base_to_cam[:3, 3])
         print("Camera Z-axis in base frame (optical axis):", H_base_to_cam[:3, 2])
 
-        # Robust detection: take multiple frames and median the result per marker id.
+        # capture multiple frames and median the result for each id
         samples_per_id = {mid: [] for mid in MY_CUBE_IDS}
         nframes = 25
         for _ in range(nframes):
@@ -154,7 +153,6 @@ def main():
                 if marker_id not in MY_CUBE_IDS:
                     continue
 
-                # More stable for planar square tags than the default iterative PnP.
                 ok, rvec, tvec = cv.solvePnP(
                     obj_points, corners[i], mtx, dist, flags=cv.SOLVEPNP_IPPE_SQUARE
                 )
@@ -176,9 +174,6 @@ def main():
 
             arr = np.vstack(samples)  # (N,3)
             med = np.median(arr, axis=0)
-            # Temporary: if the cube sits on the table and base Z=0 is the t
-            able plane,
-            # use vision for X/Y and clamp Z to the plane.
             Z_TABLE = 0.018
             HI_waypoints[marker_id] = [float(med[0]), float(med[1]), float(med[2] - 0.29)]
 
@@ -188,7 +183,7 @@ def main():
             print("No valid markers detected across frames.")
             return
 
-        # --- 4. PICK then DROP ---
+        # pick and drop
         def set_gripper_deg(angle_deg: float, duration_s: float = 0.6):
             """Command gripper by setting joint 6 (index 5)."""
             joints = list(curr_joints_rad)
@@ -199,13 +194,13 @@ def main():
         open_deg = float(getattr(robot, "open_gripper_angle", -110))
         close_deg = float(getattr(robot, "close_gripper_angle", 0))
         avoid_ids = []
+        
         for id in sorted(HI_waypoints.keys()):
             pick_id = id
             avoid_ids.append(pick_id)
             pick_pos = HI_waypoints[pick_id]
             print(f"Picking ID {pick_id}...")
 
-            # Open gripper, approach, close, lift
             curr_joints_rad = set_gripper_deg(open_deg, duration_s=0.6)
             time.sleep(0.6)
 
@@ -270,7 +265,7 @@ def main():
                 time.sleep(dt)
                 curr_joints_rad = list(final_joints)
 
-            # Release and go HOME
+            # Release and go home
             curr_joints_rad = set_gripper_deg(open_deg, duration_s=0.6)
             time.sleep(0.6)
             ee = ut.EndEffector()
